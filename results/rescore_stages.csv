@@ -1,0 +1,13 @@
+slice,depth,stage,p50_us,p99_us
+5m,300,scan,16734,17831
+5m,300,gather,54,76
+5m,300,numpy_score,193,247
+5m,300,usearch_score,69,111
+5m,3000,scan,19749,20524
+5m,3000,gather,353,498
+5m,3000,numpy_score,1493,1654
+5m,3000,usearch_score,233,269
+5m,30000,scan,42639,44533
+5m,30000,gather,3292,3463
+5m,30000,numpy_score,15250,15807
+5m,30000,usearch_score,1848,1942
