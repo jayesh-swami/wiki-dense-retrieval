@@ -9,9 +9,13 @@ NQ_REPO := google-research-datasets/nq_open
 K ?= 120
 # slice every other target works on
 SLICE ?= 5m
+# how many exact results to keep per question
+TOPK ?= 100
+# accuracy@N values to report, comma separated (each must be <= TOPK)
+AT ?= 10,20,100
 
 .DEFAULT_GOAL := help
-.PHONY: help download-wiki download-nq embed-questions slice
+.PHONY: help download-wiki download-nq embed-questions slice baseline baseline-topk-exact baseline-accuracy
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -28,3 +32,11 @@ embed-questions: ## Embed the NQ-open val and tune questions with Cohere
 
 slice: ## Sample whole articles (article_id % 1000 < K) into data/slices/SLICE (K=120 SLICE=5m)
 	uv run scripts/make_slice.py $(K) $(SLICE)
+
+baseline: baseline-topk-exact baseline-accuracy ## Run all baselines (SLICE=5m TOPK=100 AT=10,20,100)
+
+baseline-topk-exact: ## Exact top TOPK passages per question into baselines/SLICE/top-TOPK
+	uv run scripts/baseline_topk_exact.py $(SLICE) $(TOPK)
+
+baseline-accuracy: ## Answer accuracy@AT of the exact top TOPK on val, into baselines/accuracy.csv
+	uv run scripts/baseline_accuracy.py $(SLICE) $(TOPK) $(AT)
