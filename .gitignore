@@ -1,0 +1,8 @@
+# Internal design docs (not published)
+docs/DESIGN*.md
+docs/archive/
+
+data/
+
+.env
+.idea/
