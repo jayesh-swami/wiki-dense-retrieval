@@ -21,7 +21,7 @@ DEPTHS ?= 300,3000,30000
 AT ?= 10,20,100
 
 .DEFAULT_GOAL := help
-.PHONY: help download-wiki download-nq embed-questions slice full baseline baseline-topk-exact baseline-accuracy baseline-bench bench bench-rescore
+.PHONY: help download-wiki download-nq embed-questions slice full baseline baseline-topk-exact baseline-accuracy baseline-bench bench bench-rescore serve
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -58,3 +58,6 @@ bench: ## Benchmark SETUP (exact|binary|hnsw|hnsw_binary|ivf|bm25|union) with PA
 
 bench-rescore: ## Time each stage of binary scan + int8 rescore at DEPTHS; into results/rescore_stages.csv
 	uv run scripts/bench_rescore.py $(SLICE) $(DEPTHS)
+
+serve: ## Search page over the full corpus with the winning setup, at http://127.0.0.1:8000 (needs COHERE_KEY in .env)
+	uv run --env-file .env scripts/serve.py
