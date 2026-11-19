@@ -44,6 +44,7 @@ from answers import has_answer, load_answers, passage_texts
 slice_name, setup = sys.argv[1], sys.argv[2]
 params = dict(a.split("=", 1) for a in sys.argv[3:])
 qset = params.pop("qset", "val")
+K = int(params.get("k", 10))  # passages returned per question (10 or 20)
 d = Path("data/slices") / slice_name
 faiss.omp_set_num_threads(1)
 
@@ -54,25 +55,25 @@ faiss.omp_set_num_threads(1)
 # the candidates before the rescore (used by the union setup).
 
 
-def exact_top10(X, q8):
-    # Brute force int8 dot products (USearch SIMD), one thread.
-    return search(X, q8, 10, MetricKind.IP, exact=True, threads=1).keys
+def exact_top(X, q8):
+    # Brute force int8 dot products (USearch SIMD), one thread; best K, best first.
+    return search(X, q8, K, MetricKind.IP, exact=True, threads=1).keys
 
 
 def build_exact(X, B, p):
-    return lambda q8, qb, qt: exact_top10(X, q8), None
+    return lambda q8, qb, qt: exact_top(X, q8), None
 
 
 def build_binary(X, B, p):
     # Hamming scan over all binary vectors (FAISS), keep `depth` candidates,
-    # rescore those with exact int8 dot products, return the top 10.
+    # rescore those with exact int8 dot products, return the top K.
     depth = int(p.get("depth", 300))
     index = faiss.IndexBinaryFlat(1024)
     index.add(B)
 
     def run(q8, qb, qt):
         cand = index.search(qb[None], depth)[1][0]
-        return cand[exact_top10(rows(cand), q8)]
+        return cand[exact_top(rows(cand), q8)]
     return run, None
 
 
@@ -97,12 +98,12 @@ def build_hnsw(X, B, p):
     index = Index(ndim=1024, metric="ip", dtype="i8", connectivity=M, expansion_add=efc)
     build_s = load_or_build(index, Path(f"data/indexes/{slice_name}/hnsw_i8_M{M}_efc{efc}.usearch"), X)
     index.expansion_search = ef
-    return lambda q8, qb, qt: index.search(q8, 10, threads=1).keys, build_s
+    return lambda q8, qb, qt: index.search(q8, K, threads=1).keys, build_s
 
 
 def build_hnsw_binary(X, B, p):
     # USearch HNSW on the binary vectors (Hamming distance), keep `depth`
-    # candidates, rescore those with exact int8 dot products, return the top 10.
+    # candidates, rescore those with exact int8 dot products, return the top K.
     # USearch searches with max(ef, depth), so ef below depth has no effect.
     M, efc = int(p.get("M", 32)), int(p.get("efc", 128))
     ef, depth = int(p.get("ef", 256)), int(p.get("depth", 100))
@@ -115,7 +116,7 @@ def build_hnsw_binary(X, B, p):
 
     def run(q8, qb, qt):
         cand = cands(q8, qb, qt)
-        return cand[exact_top10(rows(cand), q8)]
+        return cand[exact_top(rows(cand), q8)]
     run.cands = cands
     return run, build_s
 
@@ -163,14 +164,14 @@ def build_ivf(X, B, p):
     index.nprobe = nprobe
     build_s = float(path.with_suffix(".build_s").read_text())
     if lists == "SQ8s":
-        return lambda q8, qb, qt: index.search(q8[None].astype(np.float32), 10)[1][0], build_s
+        return lambda q8, qb, qt: index.search(q8[None].astype(np.float32), K)[1][0], build_s
 
     def cands(q8, qb, qt):
         return index.search(q8[None].astype(np.float32), depth)[1][0]
 
     def run(q8, qb, qt):
         cand = cands(q8, qb, qt)
-        return cand[exact_top10(rows(cand), q8)]
+        return cand[exact_top(rows(cand), q8)]
     run.cands = cands
     return run, build_s
 
@@ -208,7 +209,7 @@ def build_bm25(X, B, p):
 
     def run(q8, qb, qt):
         query = index.parse_query(re.sub(r"[^\w\s]", " ", qt.lower()), ["body"])
-        hits = searcher.search(query, 10, count=False).hits
+        hits = searcher.search(query, K, count=False).hits
         return searcher.fast_field_values("id", [a for _, a in hits])
     return run, float((path / "build_s").read_text())
 
@@ -227,7 +228,7 @@ def build_union(X, B, p):
         ivf = pool.submit(i.cands, q8, qb, qt)
         cand = np.union1d(h.cands(q8, qb, qt), ivf.result())
         sizes.append(len(cand))
-        return cand[exact_top10(rows(cand), q8)]
+        return cand[exact_top(rows(cand), q8)]
     run.sizes = sizes
     return run, hb + ib
 
@@ -281,7 +282,7 @@ for q8, qb, qt in zip(warm8, warmb, warm_texts):
     run_search(q8, qb, qt)
 if params.get("cache") == "cold":
     os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-found = np.zeros((len(Q8), 10), dtype=np.int64)
+found = np.zeros((len(Q8), K), dtype=np.int64)
 lat_ns = np.zeros(len(Q8), dtype=np.int64)
 for i, (q8, qb, qt) in enumerate(zip(Q8, Qb, texts)):
     t = time.perf_counter_ns()
@@ -289,10 +290,11 @@ for i, (q8, qb, qt) in enumerate(zip(Q8, Qb, texts)):
     lat_ns[i] = time.perf_counter_ns() - t
 
 # Score
-recall = np.mean([len(set(f) & set(g)) / 10 for f, g in zip(found, gt)])
+recall = np.mean([len(set(f[:10]) & set(g)) / 10 for f, g in zip(found, gt)])
 passages = passage_texts(slice_name, found.ravel())
-accuracy = np.mean([any(has_answer(p, ans) for p in passages[i * 10:(i + 1) * 10])
-                    for i, ans in enumerate(answers)])
+hits = [[has_answer(p, ans) for p in passages[i * K:(i + 1) * K]] for i, ans in enumerate(answers)]
+accuracy = np.mean([any(h[:10]) for h in hits])
+accuracy20 = f"{np.mean([any(h[:20]) for h in hits]):.4f}" if K >= 20 else ""
 ms = lat_ns / 1e6
 if hasattr(run_search, "sizes"):
     print(f"merged candidates per question: mean {np.mean(run_search.sizes):.0f}, max {max(run_search.sizes)}")
@@ -306,7 +308,7 @@ np.save(f"results/latencies/{run}.npy", lat_ns)
 row = {
     "run": run, "slice": slice_name, "setup": setup, "params": json.dumps(params),
     "qset": qset, "questions": len(Q8),
-    "recall@10": f"{recall:.4f}", "accuracy@10": f"{accuracy:.4f}",
+    "recall@10": f"{recall:.4f}", "accuracy@10": f"{accuracy:.4f}", "accuracy@20": accuracy20,
     "p50_ms": f"{p50:.2f}", "p95_ms": f"{p95:.2f}", "p99_ms": f"{p99:.2f}",
     "mean_ms": f"{ms.mean():.2f}", "build_s": f"{build_s:.1f}",
     "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024,
