@@ -1,0 +1,18 @@
+# Python 3.12. The scripts also declare their own dependencies inline, so `uv run <script>`
+# works without this file. With pip: pip install -r requirements.txt, then python <script>.
+
+# Search: indexes, retrieval, API
+faiss-cpu==1.16.0
+usearch==2.26.6
+numpy==2.5.5
+cohere==7.3.1
+fastapi==0.165.0
+uvicorn==0.54.0
+
+# Data preparation (hf CLI for make download-wiki, parquet reading)
+huggingface-hub==2.4.0
+pyarrow==26.0.1
+
+# Benchmarks only (smaller slices, BM25)
+duckdb==2.0.0
+tantivy==0.27.0
