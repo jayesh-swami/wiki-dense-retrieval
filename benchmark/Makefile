@@ -4,6 +4,9 @@
 # Recipes must be indented with tabs, not spaces.
 
 ROOT := ..
+NQ_REPO := google-research-datasets/nq_open
+# make slice K=24 SLICE=1m: keep articles with article_id % 1000 < K
+K ?= 120
 # slice every target works on (5m, 1m, full)
 SLICE ?= 5m
 # how many exact results to keep per question
@@ -20,11 +23,20 @@ DEPTHS ?= 300,3000,30000
 WINNER := h.M=16 h.ef=250 h.depth=250 i.nlist=65536 i.coarse=hnsw i.nprobe=128 i.depth=200 int8=ssd cache=cold
 
 .DEFAULT_GOAL := help
-.PHONY: help baseline baseline-topk-exact baseline-accuracy baseline-bench bench bench-rescore bench-winner
+.PHONY: help download-nq embed-questions slice baseline baseline-topk-exact baseline-accuracy baseline-bench bench bench-rescore bench-winner
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+download-nq: ## Download the NQ-open questions
+	cd $(ROOT) && hf download $(NQ_REPO) --repo-type dataset --local-dir data/nq_open
+
+embed-questions: ## Embed the NQ-open val and tune questions with Cohere (needs COHERE_KEY in .env)
+	cd $(ROOT) && uv run --env-file .env benchmark/scripts/embed_questions.py
+
+slice: ## Sample whole articles (article_id % 1000 < K) into data/slices/SLICE (K=120 SLICE=5m)
+	cd $(ROOT) && uv run benchmark/scripts/make_slice.py $(K) $(SLICE)
 
 baseline: baseline-topk-exact baseline-accuracy baseline-bench ## Run all baselines (SLICE=5m TOPK=100 AT=10,20,100)
 
