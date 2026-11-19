@@ -23,7 +23,7 @@ DEPTHS ?= 300,3000,30000
 WINNER := h.M=16 h.ef=250 h.depth=250 i.nlist=65536 i.coarse=hnsw i.nprobe=128 i.depth=200 int8=ssd cache=cold
 
 .DEFAULT_GOAL := help
-.PHONY: help download-nq embed-questions slice baseline baseline-topk-exact baseline-accuracy baseline-bench bench bench-rescore bench-winner
+.PHONY: help download-nq embed-questions slice charts baseline baseline-topk-exact baseline-accuracy baseline-bench bench bench-rescore bench-winner
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -57,3 +57,6 @@ bench-winner: ## Benchmark the winning setup on the full corpus, QSET=val, cold 
 
 bench-rescore: ## Time each stage of binary scan + int8 rescore at DEPTHS; into results/rescore_stages.csv
 	cd $(ROOT) && uv run benchmark/scripts/bench_rescore.py $(SLICE) $(DEPTHS)
+
+charts: ## Redraw benchmark/charts/*.png from results/results.csv
+	cd $(ROOT) && uv run benchmark/scripts/charts.py
