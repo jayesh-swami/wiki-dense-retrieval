@@ -14,6 +14,7 @@
 # Usage: bench.py 5m exact
 #        bench.py 5m binary depth=300 qset=tune
 #        bench.py 5m hnsw M=32 efc=128 ef=128 qset=tune
+#        bench.py 5m hnsw_binary M=32 efc=128 ef=256 depth=100 qset=tune
 #        bench.py 5m ivf coarse=flat|hnsw nlist=16384 nprobe=384 qset=tune
 
 import csv
@@ -64,23 +65,46 @@ def build_binary(X, B, p):
     return run, None
 
 
-def build_hnsw(X, B, p):
-    # USearch HNSW on the int8 vectors. The graph walk scores with int8 dot
-    # products, so no rescore. The index is saved and reused, because only
-    # ef (search effort) changes between runs; the build uses all cores.
-    M, efc, ef = int(p.get("M", 32)), int(p.get("efc", 128)), int(p.get("ef", 128))
-    path = Path(f"data/indexes/{slice_name}/hnsw_i8_M{M}_efc{efc}.usearch")
-    index = Index(ndim=1024, metric="ip", dtype="i8", connectivity=M, expansion_add=efc)
+def load_or_build(index, path, vectors):
+    # Load a saved USearch index, or build it on all cores and save it with its
+    # build time. Indexes are reused because only ef/depth change between runs.
     if path.exists():
         index.load(path)
     else:
         t = time.perf_counter()
-        index.add(np.arange(len(X)), X, threads=0)
+        index.add(np.arange(len(vectors)), vectors, threads=0)
         path.parent.mkdir(parents=True, exist_ok=True)
         index.save(path)
         path.with_suffix(".build_s").write_text(f"{time.perf_counter() - t:.1f}")
+    return float(path.with_suffix(".build_s").read_text())
+
+
+def build_hnsw(X, B, p):
+    # USearch HNSW on the int8 vectors. The graph walk scores with int8 dot
+    # products, so no rescore.
+    M, efc, ef = int(p.get("M", 32)), int(p.get("efc", 128)), int(p.get("ef", 128))
+    index = Index(ndim=1024, metric="ip", dtype="i8", connectivity=M, expansion_add=efc)
+    build_s = load_or_build(index, Path(f"data/indexes/{slice_name}/hnsw_i8_M{M}_efc{efc}.usearch"), X)
     index.expansion_search = ef
-    return lambda q8, qb: index.search(q8, 10, threads=1).keys, float(path.with_suffix(".build_s").read_text())
+    return lambda q8, qb: index.search(q8, 10, threads=1).keys, build_s
+
+
+def build_hnsw_binary(X, B, p):
+    # USearch HNSW on the binary vectors (Hamming distance), keep `depth`
+    # candidates, rescore those with exact int8 dot products, return the top 10.
+    # The int8 vectors are read into RAM so the page cache can't change results.
+    # USearch searches with max(ef, depth), so ef below depth has no effect.
+    M, efc = int(p.get("M", 32)), int(p.get("efc", 128))
+    ef, depth = int(p.get("ef", 256)), int(p.get("depth", 100))
+    X = np.array(X)
+    index = Index(ndim=1024, metric="hamming", dtype="b1", connectivity=M, expansion_add=efc)
+    build_s = load_or_build(index, Path(f"data/indexes/{slice_name}/hnsw_b1_M{M}_efc{efc}.usearch"), B)
+    index.expansion_search = ef
+
+    def run(q8, qb):
+        cand = index.search(qb, depth, threads=1).keys
+        return cand[exact_top10(X[cand], q8)]
+    return run, build_s
 
 
 def build_ivf(X, B, p):
@@ -119,7 +143,8 @@ def build_ivf(X, B, p):
             float(path.with_suffix(".build_s").read_text()))
 
 
-SETUPS = {"exact": build_exact, "binary": build_binary, "hnsw": build_hnsw, "ivf": build_ivf}
+SETUPS = {"exact": build_exact, "binary": build_binary, "hnsw": build_hnsw,
+          "hnsw_binary": build_hnsw_binary, "ivf": build_ivf}
 
 # Load data
 X = np.load(d / "int8.npy", mmap_mode="r")
