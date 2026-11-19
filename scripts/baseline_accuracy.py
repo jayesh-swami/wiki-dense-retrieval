@@ -15,30 +15,27 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 
-from answers import has_answer
+from answers import has_answer, load_answers
 
 name, K, ats = sys.argv[1], int(sys.argv[2]), [int(a) for a in sys.argv[3].split(",")]
 assert max(ats) <= K, f"accuracy@{max(ats)} needs top-K with K >= {max(ats)}"
 
 out = Path("baselines") / name / f"top-{K}"
 gt = np.load(out / "gt_val.npy")[:, :max(ats)]
-questions = pq.read_table("data/questions/val/questions.parquet")
-answers = questions["answers" if "answers" in questions.column_names else "answer"].to_pylist()
+answers = load_answers("val")
 text = pq.read_table(f"data/slices/{name}/passages.parquet", columns=["text"])["text"]
 
 passages = text.take(gt.ravel()).to_pylist()
-hits = np.zeros(gt.shape, dtype=bool)
-for q, ans in enumerate(answers):
-    for r in range(gt.shape[1]):
-        hits[q, r] = has_answer(passages[q * gt.shape[1] + r], ans)
+n = gt.shape[1]
+hits = np.array([[has_answer(passages[q * n + r], ans) for r in range(n)] for q, ans in enumerate(answers)])
 
 table = Path("baselines/accuracy.csv")
 rows = list(csv.DictReader(table.open())) if table.exists() else []
 rows = [r for r in rows if not (r["slice"] == name and r["topk"] == str(K) and int(r["at"]) in ats)]
-for n in ats:
-    acc = hits[:, :n].any(axis=1).mean()
-    rows.append({"slice": name, "topk": str(K), "at": str(n), "accuracy": f"{acc:.4f}"})
-    print(f"{name} top-{K} accuracy@{n}: {acc:.4f}")
+for at in ats:
+    acc = hits[:, :at].any(axis=1).mean()
+    rows.append({"slice": name, "topk": str(K), "at": str(at), "accuracy": f"{acc:.4f}"})
+    print(f"{name} top-{K} accuracy@{at}: {acc:.4f}")
 
 rows.sort(key=lambda r: (r["slice"], int(r["topk"]), int(r["at"])))
 with table.open("w", newline="") as f:

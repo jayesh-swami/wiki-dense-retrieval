@@ -4,6 +4,12 @@
 import re
 import string
 
+import pyarrow.parquet as pq
+
+
+def load_answers(qset):
+    return pq.read_table(f"data/questions/{qset}/questions.parquet")["answer"].to_pylist()
+
 
 def normalize(s):
     s = s.lower()
