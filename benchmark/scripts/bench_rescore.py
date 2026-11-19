@@ -5,7 +5,7 @@
 # Time each stage of "binary scan + int8 rescore" separately, one thread,
 # on the first 500 val questions: FAISS binary scan, gathering the candidate
 # int8 rows, and scoring them with numpy or with USearch.
-# Adds rows to results/rescore_stages.csv (slice, depth, stage, p50_us, p99_us).
+# Adds rows to benchmark/results/rescore_stages.csv (slice, depth, stage, p50_us, p99_us).
 # Usage: bench_rescore.py 5m 300,3000,30000
 
 import csv
@@ -53,7 +53,7 @@ for depth in depths:
                      "p50_us": f"{p50:.0f}", "p99_us": f"{p99:.0f}"})
         print(f"{slice_name} depth {depth} {stage}: p50 {p50:.0f} us, p99 {p99:.0f} us")
 
-table = Path("results/rescore_stages.csv")
+table = Path("benchmark/results/rescore_stages.csv")
 new = not table.exists()
 with table.open("a", newline="") as f:
     w = csv.DictWriter(f, fieldnames=rows[0].keys())

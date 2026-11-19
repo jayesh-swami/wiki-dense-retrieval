@@ -4,8 +4,8 @@
 # ///
 # Answer accuracy@N of the exact top-K: the share of val questions where one of
 # the first N passages contains an answer string (normalised, whole words).
-# Reads baselines/<name>/top-<K>/gt_val.npy, the slice text and the val answers.
-# Adds or updates rows in baselines/accuracy.csv (slice, topk, at, accuracy)
+# Reads benchmark/baselines/<name>/top-<K>/gt_val.npy, the slice text and the val answers.
+# Adds or updates rows in benchmark/baselines/accuracy.csv (slice, topk, at, accuracy)
 # Usage: baseline_accuracy.py 5m 100 10,100
 
 import csv
@@ -19,7 +19,7 @@ from answers import has_answer, load_answers, passage_texts
 name, K, ats = sys.argv[1], int(sys.argv[2]), [int(a) for a in sys.argv[3].split(",")]
 assert max(ats) <= K, f"accuracy@{max(ats)} needs top-K with K >= {max(ats)}"
 
-out = Path("baselines") / name / f"top-{K}"
+out = Path("benchmark/baselines") / name / f"top-{K}"
 gt = np.load(out / "gt_val.npy")[:, :max(ats)]
 answers = load_answers("val")
 
@@ -27,7 +27,7 @@ passages = passage_texts(name, gt.ravel())
 n = gt.shape[1]
 hits = np.array([[has_answer(passages[q * n + r], ans) for r in range(n)] for q, ans in enumerate(answers)])
 
-table = Path("baselines/accuracy.csv")
+table = Path("benchmark/baselines/accuracy.csv")
 rows = list(csv.DictReader(table.open())) if table.exists() else []
 rows = [r for r in rows if not (r["slice"] == name and r["topk"] == str(K) and int(r["at"]) in ats)]
 for at in ats:

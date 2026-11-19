@@ -5,7 +5,7 @@
 # Exact (brute-force) top K passages (default 100) for every question, by int8 dot product.
 # This is the ground truth every index is compared against.
 # Reads data/slices/<name>/int8.npy and data/questions/<set>/q_int8.npy
-# Writes baselines/<name>/top-<K>/gt_<set>.npy: (questions, K) passage row ids, best first
+# Writes benchmark/baselines/<name>/top-<K>/gt_<set>.npy: (questions, K) passage row ids, best first
 # Usage: baseline_topk_exact.py 5m [K]
 
 import sys
@@ -20,7 +20,7 @@ name = sys.argv[1]
 K = int(sys.argv[2]) if len(sys.argv) > 2 else 100
 d = Path("data/slices") / name
 X = np.load(d / "int8.npy", mmap_mode="r")
-out = Path("baselines") / name / f"top-{K}"
+out = Path("benchmark/baselines") / name / f"top-{K}"
 out.mkdir(parents=True, exist_ok=True)
 
 for qset in ["val", "tune"]:

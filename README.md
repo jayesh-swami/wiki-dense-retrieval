@@ -71,12 +71,16 @@ Work in progress.
 
 ## Running it
 
-Everything runs through `make`. Run `make` to list the steps (download, build the full corpus files, embed questions, baselines, benchmarks). Scripts are in `scripts/`, and results go to `results/`.
+Everything runs through `make`. Run `make` to list the steps.
 
-The winner, on the validation questions with a cold cache:
+- `make download-wiki download-nq` downloads the passages, vectors and questions.
+- `make full` writes the full corpus files, and `make embed-questions` embeds the questions with Cohere.
+- `make winner` builds the winning setup's two indexes (about 1.75 hours, peak about 23 GB of RAM).
+
+Benchmarking lives in `benchmark/`, with its own Makefile (`make -C benchmark` lists its targets). Its scripts are in `benchmark/scripts/` and results go to `benchmark/results/`. To reproduce the winner's numbers on the validation questions with a cold cache, first build the exact ground truth (`make -C benchmark baseline-topk-exact SLICE=full`), then run:
 
 ```
-uv run scripts/bench.py full union h.M=16 h.ef=250 h.depth=250 i.nlist=65536 i.coarse=hnsw i.nprobe=128 i.depth=200 int8=ssd cache=cold qset=val
+make -C benchmark bench-winner
 ```
 
 **Search page.** `make serve` starts a small local page at http://127.0.0.1:8000 over the winning setup. It embeds the query with Cohere (needs `COHERE_KEY` in `.env`), retrieves the top 10 passages and shows the embedding and retrieval times. It loads the indexes in about 20 seconds and holds about 15 GB of RAM while running.

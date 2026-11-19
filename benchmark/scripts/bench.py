@@ -9,8 +9,8 @@
 # after 50 untimed warm-up searches. Question loading and scoring are outside
 # the timer. p50/p95/p99 come from those per-question times.
 #
-# Appends one row to results/results.csv and saves the raw per-question times
-# to results/latencies/<run>.npy.
+# Appends one row to benchmark/results/results.csv and saves the raw per-question times
+# to benchmark/results/latencies/<run>.npy.
 # Usage: bench.py 5m exact
 #        bench.py 5m binary depth=300 qset=tune
 #        bench.py 5m hnsw M=32 efc=128 ef=128 qset=tune
@@ -245,7 +245,7 @@ Qb = np.load(f"data/questions/{qset}/q_binary.npy")
 warm = "tune" if qset == "val" else "val"
 warm8 = np.load(f"data/questions/{warm}/q_int8.npy")[:50]
 warmb = np.load(f"data/questions/{warm}/q_binary.npy")[:50]
-gt = np.load(f"baselines/{slice_name}/top-100/gt_{qset}.npy")[:, :10]
+gt = np.load(f"benchmark/baselines/{slice_name}/top-100/gt_{qset}.npy")[:, :10]
 answers = load_answers(qset)
 texts = pq.read_table(f"data/questions/{qset}/questions.parquet")["question"].to_pylist()
 warm_texts = pq.read_table(f"data/questions/{warm}/questions.parquet")["question"].to_pylist()[:50]
@@ -313,8 +313,8 @@ p50, p95, p99 = np.percentile(ms, [50, 95, 99])
 # Save
 tag = "_".join(f"{k}{v}" for k, v in params.items())
 run = f"{datetime.now():%Y%m%d-%H%M%S}_{slice_name}_{setup}" + (f"_{tag}" if tag else "") + f"_{qset}"
-Path("results/latencies").mkdir(parents=True, exist_ok=True)
-np.save(f"results/latencies/{run}.npy", lat_ns)
+Path("benchmark/results/latencies").mkdir(parents=True, exist_ok=True)
+np.save(f"benchmark/results/latencies/{run}.npy", lat_ns)
 row = {
     "run": run, "slice": slice_name, "setup": setup, "params": json.dumps(params),
     "qset": qset, "questions": len(Q8),
@@ -323,7 +323,7 @@ row = {
     "mean_ms": f"{ms.mean():.2f}", "build_s": f"{build_s:.1f}",
     "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024,
 }
-table = Path("results/results.csv")
+table = Path("benchmark/results/results.csv")
 new = not table.exists()
 with table.open("a", newline="") as f:
     w = csv.DictWriter(f, fieldnames=row.keys())
