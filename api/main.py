@@ -6,7 +6,9 @@
 # A query is embedded with Cohere (same model as the passages), then binary HNSW (ef 250,
 # depth 250) and IVF-PQ (nprobe 128, depth 200) run in parallel, their candidates are
 # merged and rescored with exact int8 vectors read from the SSD, and the top 10 are returned.
-# Each search makes one Cohere embed call (the trial key allows 2,000 embed inputs a minute).
+# Each search makes one Cohere embed call (the trial key allows 100 calls a minute).
+# GET /api/warm?seconds=N keeps the CPU caches warm for N seconds by running stored val
+# question vectors through retrieval back to back (no Cohere calls); seconds=0 stops it.
 # Loads the indexes at startup (~20-30 s) and holds ~18 GiB of RAM (14.8 GB of index files).
 # Usage: uv run --env-file .env api/main.py   (from the repo root; then open http://127.0.0.1:8000)
 
@@ -59,7 +61,30 @@ def retrieve(q8, qb):
     return cand[search(np.array(X[cand]), q8, 10, MetricKind.IP, exact=True, threads=1).keys]
 
 
+Q8, QB = np.load("data/questions/val/q_int8.npy"), np.load("data/questions/val/q_binary.npy")
+warm_until, warmer = 0.0, None
+
+
+def keep_warm():
+    i = 0
+    while time.perf_counter() < warm_until:
+        with one_at_a_time:
+            retrieve(Q8[i % len(Q8)], QB[i % len(QB)])
+        i += 1
+        time.sleep(0.0005)  # let a waiting page search take the lock
+
+
 app = FastAPI()
+
+
+@app.get("/api/warm")
+def warm(seconds: float = 600):  # seconds=0 stops the warm-up
+    global warm_until, warmer
+    warm_until = time.perf_counter() + seconds
+    if seconds > 0 and not (warmer and warmer.is_alive()):
+        warmer = threading.Thread(target=keep_warm, daemon=True)
+        warmer.start()
+    return {"warming_s": seconds}
 
 
 @app.get("/api/search")
