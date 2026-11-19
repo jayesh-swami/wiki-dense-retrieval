@@ -32,6 +32,8 @@ About half of each search is the two index lookups and half is reading the ~371 
 
 The two indexes miss different passages. Each one alone stays below the recall bar at 41.5M, and together they pass.
 
+**These numbers are for continuous queries.** The benchmark sends the questions one after another with no gap, after 50 warm-up queries. On the search page below, each query first waits a few hundred milliseconds for the Cohere embedding call, and retrieval then takes about 7 ms (median). With a 2 second pause before each query it takes about 11 ms. On this machine the gap between queries most likely lets other work evict the indexes' hot data from the CPU caches and lets the cores go idle, so each search starts cold. A system under steady traffic stays warm.
+
 **Final check.** The two best unions were run 5 times each on val, alternating, because a single run's p99 moves by 1 to 2 ms with the SSD's slow reads. The HNSW side keeping 250 candidates beat keeping 300 at every percentile (median p99 3.96 against 4.51 ms, p50 2.66 against 2.81 ms). Recall and accuracy were the same in every run. Both clear the accuracy bar only narrowly, by 1 and 3 questions out of 3,610.
 
 **Machine.** A laptop with 27 GB of RAM available to the CPU and a WD SN770M NVMe SSD. Only the indexes fit in RAM, so the int8 vectors stay on disk.
@@ -76,6 +78,8 @@ The winner, on the validation questions with a cold cache:
 ```
 uv run scripts/bench.py full union h.M=16 h.ef=250 h.depth=250 i.nlist=65536 i.coarse=hnsw i.nprobe=128 i.depth=200 int8=ssd cache=cold qset=val
 ```
+
+**Search page.** `make serve` starts a small local page at http://127.0.0.1:8000 over the winning setup. It embeds the query with Cohere (needs `COHERE_KEY` in `.env`), retrieves the top 10 passages and shows the embedding and retrieval times. It loads the indexes in about 20 seconds and holds about 15 GB of RAM while running.
 
 ## Data
 
