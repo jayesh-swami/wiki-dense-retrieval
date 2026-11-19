@@ -253,8 +253,8 @@ warm_texts = pq.read_table(f"data/questions/{warm}/questions.parquet")["question
 # Rescore reads. int8=ram (default): all int8 vectors are copied into RAM on first
 # use (fine at 5m). int8=ssd: rows are gathered from the memory-mapped int8.npy,
 # after one posix_fadvise(WILLNEED) per row. That queues all reads at once, so the
-# SSD serves them in parallel (~0.2 ms for 300 rows cold), and the gather itself is
-# one NumPy call. cache=cold evicts int8.npy from the page cache after the warm-up,
+# SSD serves them in parallel (~1.4 ms for ~400 random rows cold, about this SSD's
+# limit), and the gather itself is one NumPy call. cache=cold evicts int8.npy from the page cache after the warm-up,
 # so timed reads start on the SSD.
 fd = os.open(d / "int8.npy", os.O_RDONLY)
 
@@ -267,9 +267,19 @@ def x_in_ram():
 def rows(ids):
     if params.get("int8", "ram") == "ram":
         return x_in_ram()[ids]
-    for i in ids:
-        os.posix_fadvise(fd, X.offset + 1024 * int(i), 1024, os.POSIX_FADV_WILLNEED)
+    offs = (ids * 1024 + X.offset).tolist()
+    list(advisers.map(advise, [offs[k::4] for k in range(4)]))
     return np.array(X[ids])
+
+
+# Each cold fadvise costs ~3 us in the kernel (page allocation + read submission), so the
+# calls are split over 4 threads (os.posix_fadvise releases the GIL). 8 threads is worse at p99.
+advisers = ThreadPoolExecutor(4)
+
+
+def advise(offs):
+    for o in offs:
+        os.posix_fadvise(fd, o, 1024, os.POSIX_FADV_WILLNEED)
 
 
 # Build
