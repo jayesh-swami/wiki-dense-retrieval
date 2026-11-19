@@ -1,89 +1,61 @@
 # wiki-hybrid-retrieval
 
-Fast retrieval over all of English Wikipedia (41.5M passages) on a single laptop. The goal is the lowest p95 and p99 search latency that still finds the right passages.
+Semantic search over all of English Wikipedia (41.5M passages) on a single laptop, in about 4 ms at p99.
 
-Each search setup is compared with exact search on the same vectors. A setup counts only if it passes two checks.
+![The search page: a retro terminal showing the top passages for "Where was the world wide web invented", with Tim Berners-Lee at CERN as the first result](search-page.png)
 
-- recall@10 of at least 0.95 against the exact top 10
-- answer accuracy within 1 point of exact search (does a top 10 passage contain an answer to the question)
+## Numbers
 
-Among the setups that pass, the one with the lowest p99 wins. Settings are tuned on 3,000 NQ-open train questions and reported on the 3,610 validation questions. Each question is searched alone, and the timer covers the whole search, from the question vector to the final 10 passage ids. Embedding the question is not included.
+Measured on the 3,610 NQ-open validation questions, one query at a time, with a cold page cache. Latency is the median of 5 runs and covers retrieval only, from the query vector to the top 10 passage ids.
 
-## Result
-
-The winner at 41.5M passages is a union of two approximate indexes, searched in parallel on two threads.
-
-- **Binary HNSW** (USearch, 1-bit vectors, Hamming distance, M=16) keeps its best 250 candidates.
-- **IVF-PQ fast-scan** (FAISS, 65,536 cells with an HNSW graph over the centres, 64-byte PQ codes) scans 128 cells and keeps its best 200.
-
-The two candidate lists are merged (about 371 passages per question) and rescored with the exact int8 vectors, which are read from the SSD. The top 10 after the rescore is the answer.
-
-| NQ-open val, 3,610 questions, cold page cache, median of 5 runs | |
+| | |
 |---|---|
 | p50 | **2.66 ms** |
 | p95 | **3.24 ms** |
 | p99 | **3.96 ms** |
-| recall@10 | 0.956 |
-| answer accuracy@10 | 77.23% (exact search 78.20%, bar 77.20%) |
-| RAM for the indexes | 14.8 GB (11.5 GB HNSW + 3.3 GB IVF-PQ) |
-| int8 vectors | 40 GB, on the SSD |
+| recall@10 against exact search | 0.956 |
+| answer accuracy@10 | 77.23% (exact search: 78.20%) |
+| RAM while serving | about 18 GiB |
+| int8 vectors | 42.5 GB, read from the SSD |
 
-About half of each search is the two index lookups and half is reading the ~371 int8 vectors from the SSD. The reads are started together with `posix_fadvise(WILLNEED)` from four threads, and they reach about 75 to 80% of the drive's random-read limit as measured with fio. A cold page cache is the worst case. With real traffic, popular passages would stay cached.
+These are numbers for continuous queries. On the search page each query first waits for the Cohere embedding call, and retrieval then takes about 7 to 11 ms, because the CPU caches go cold between queries. Embedding the query with Cohere's API takes another 180 to 450 ms or so.
 
-The two indexes miss different passages. Each one alone stays below the recall bar at 41.5M, and together they pass.
+How the setup was chosen, with every algorithm tried and its numbers, is in [benchmark/README.md](benchmark/README.md).
 
-**These numbers are for continuous queries.** The benchmark sends the questions one after another with no gap, after 50 warm-up queries. On the search page below, each query first waits a few hundred milliseconds for the Cohere embedding call, and retrieval then takes about 7 ms (median). With a 2 second pause before each query it takes about 11 ms. On this machine the gap between queries most likely lets other work evict the indexes' hot data from the CPU caches and lets the cores go idle, so each search starts cold. A system under steady traffic stays warm.
+## How it works
 
-**Final check.** The two best unions were run 5 times each on val, alternating, because a single run's p99 moves by 1 to 2 ms with the SSD's slow reads. The HNSW side keeping 250 candidates beat keeping 300 at every percentile (median p99 3.96 against 4.51 ms, p50 2.66 against 2.81 ms). Recall and accuracy were the same in every run. Both clear the accuracy bar only narrowly, by 1 and 3 questions out of 3,610.
+1. The query is embedded with Cohere `embed-multilingual-v3.0`, the same model that embedded the passages, as int8 and binary vectors.
+2. Two approximate indexes search in parallel threads.
+   - **Binary HNSW** (USearch, 1-bit vectors, Hamming distance, M=16) keeps its best 250 passages.
+   - **IVF-PQ fast-scan** (FAISS, 65,536 cells, 64-byte codes) scans 128 cells and keeps its best 200.
+3. The two lists are merged (about 371 passages) and rescored with exact int8 dot products. The int8 vectors stay on the SSD, and the ~371 rows are read with parallel `posix_fadvise` hints.
+4. The top 10 are returned with their text.
 
-**Machine.** A laptop with 27 GB of RAM available to the CPU and a WD SN770M NVMe SSD. Only the indexes fit in RAM, so the int8 vectors stay on disk.
+At these settings neither index is enough on its own (IVF-PQ alone peaks at recall 0.915 at 41.5M). They miss different passages, so together they pass.
 
-## What was tried
-
-### 5M passages (all vectors in RAM)
-
-| Setup | Outcome |
-|---|---|
-| Exact int8 search | Reference only. Too slow to serve. |
-| Binary scan over all passages + int8 rescore | Dropped. Accurate, but scanning every passage is far too slow. |
-| HNSW on int8 vectors | Fastest at 5M, but dropped because the index would need about 54 GB at 41.5M. |
-| IVF with int8 lists (flat and HNSW coarse search, several cell counts) | Dropped. It needs to scan many cells to reach the recall bar, and the scan is limited by memory bandwidth. |
-| IMI (inverted multi-index) | Dropped. Cells are very uneven, so the slow tail is long. |
-| BM25 (Tantivy) | Kept as optional. On NQ it rarely finds an answer that dense search misses, and it is much slower. |
-| Binary HNSW + int8 rescore | Shortlisted. |
-| IVF-PQ fast-scan + int8 rescore | Shortlisted, mainly for its small memory footprint. |
-| Union of binary HNSW and IVF-PQ, one rescore | Shortlisted as the lead. Two setups that each miss the bar pass it together. |
-
-### 41.5M passages (int8 vectors on SSD)
-
-| Setup | Outcome |
-|---|---|
-| Binary HNSW + int8 rescore (two settings) | Pass on the tuning questions, but slower than the union. |
-| IVF-PQ fast-scan + int8 rescore (five settings) | All miss the recall bar at this scale. Lowest memory of all (about 7 GB in use). |
-| Union of binary HNSW and IVF-PQ (six settings) | **Winner** (above), passing on both the tuning and validation questions. The fastest setting misses the accuracy bar by one question out of 3,610. |
-
-## Status
-
-Work in progress.
-
-- Done: all setups at 5M, the shortlist at 41.5M, the winner confirmed on the validation set.
-- Next: an answer step with context engineering on top of the winner. A BM25 recheck at 41.5M is optional.
+`api/main.py` is a FastAPI server that holds both indexes in memory and serves the search page from `web/` (React).
 
 ## Running it
 
-Everything runs through `make`. Run `make` to list the steps.
+**You need** Linux, Python 3.12 with [uv](https://docs.astral.sh/uv/), Node.js, a free [Cohere](https://cohere.com) API key, an NVMe SSD with about 140 GB free, and a machine with 32 GiB of RAM (about 22 GiB free while building, 18 GiB while serving).
 
-- `make download-wiki` downloads the passages and vectors.
-- `make full` writes the full corpus files.
-- `make winner` builds the winning setup's two indexes (about 1.75 hours, peak about 23 GB of RAM).
+| Step | Command | Time | Peak RAM | Disk |
+|---|---|---|---|---|
+| 1. Download passages and vectors | `make download-wiki` | depends on your connection | small | 58 GB |
+| 2. Write the corpus files | `make full` | ~3 min | ~11 GiB | 64 GB |
+| 3. Build the two indexes | `make winner` | ~1.6 h | ~22 GiB | 15 GB |
+| 4. Serve the search page | `make serve` | 20 to 30 s to load | ~18 GiB | |
 
-Benchmarking lives in `benchmark/`, with its own Makefile (`make -C benchmark` lists its targets, including downloading and embedding the NQ-open questions and making smaller slices). Its scripts are in `benchmark/scripts/` and results go to `benchmark/results/`. To reproduce the winner's numbers on the validation questions with a cold cache, first build the exact ground truth (`make -C benchmark baseline-topk-exact SLICE=full`), then run:
+Before step 4, put the key in `.env` as `COHERE_KEY=...`. Then open http://127.0.0.1:8000. `make` lists all targets, and `requirements.txt` pins the Python packages for pip users.
+
+## Layout
 
 ```
-make -C benchmark bench-winner
+api/          FastAPI server (search + page)
+web/          React search page
+scripts/      corpus files (make_full.py) and index build (build_winner.py)
+benchmark/    everything used to choose the setup: scripts, results, charts, its own Makefile and README
 ```
-
-**Search page.** `make serve` builds the React page (`web/`) and starts the FastAPI server (`api/main.py`) at http://127.0.0.1:8000, over the winning setup. `GET /api/search?q=...` embeds the query with Cohere (needs `COHERE_KEY` in `.env`), retrieves the top 10 passages and returns them with the embedding and retrieval times. The server loads the indexes in about 20 to 30 seconds and holds about 15 GB of RAM while running. `make web-dev` runs the page with live reload against the same API.
 
 ## Data
 
