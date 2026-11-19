@@ -5,11 +5,11 @@
 # Build the two indexes of the winning setup for the full corpus (data/slices/full),
 # one after the other, skipping any that already exist:
 #   1. binary HNSW (USearch, M=16, efc=128) over binary.npy
-#      ~13 min, peak ~18 GB -> data/indexes/full/hnsw_b1_M16_efc128.usearch (11.5 GB)
+#      ~13 min, peak ~17 GiB RAM -> data/indexes/full/hnsw_b1_M16_efc128.usearch (11.5 GB)
 #   2. IVF65536 + PQ128x4fs (FAISS fast-scan, 64 B per passage, inner product) over int8.npy,
 #      trained on a 1.3M-passage sample (FAISS needs float32), then added in batches of 1M.
 #      Passages are assigned to cells through an HNSW graph over the centres.
-#      ~1.5 h (mostly k-means), peak ~23 GB -> data/indexes/full/IVF65536_PQ128x4fs.faiss (3.3 GB)
+#      ~1.4 h (1 h of it k-means), peak ~22 GiB RAM -> data/indexes/full/IVF65536_PQ128x4fs.faiss (3.3 GB)
 # Each index gets a .build_s file with its build time, which the benchmark reads.
 # Usage: build_winner.py
 

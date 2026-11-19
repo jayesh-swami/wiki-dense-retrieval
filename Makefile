@@ -18,13 +18,13 @@ download-wiki: ## Download the English Wikipedia passages + int8/binary vectors 
 full: ## Write the full corpus (41.5M) as aligned int8, binary, text.bin + offsets into data/slices/full
 	uv run scripts/make_full.py
 
-winner: ## Build the winning setup's two indexes for the full corpus (~1.75 h, peak ~23 GB RAM; needs make full)
+winner: ## Build the winning setup's two indexes for the full corpus (~1.6 h, peak ~22 GiB RAM; needs make full)
 	uv run scripts/build_winner.py
 
 web: ## Build the React search page into web/dist
 	cd web && npm install && npm run build
 
-serve: web ## Search API + page at http://127.0.0.1:8000 (needs make winner and COHERE_KEY in .env; ~15 GB RAM)
+serve: web ## Search API + page at http://127.0.0.1:8000 (needs make winner and COHERE_KEY in .env; ~18 GiB RAM)
 	uv run --env-file .env api/main.py
 
 web-dev: ## React dev server at http://127.0.0.1:5173, forwarding /api to make serve

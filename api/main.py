@@ -7,7 +7,7 @@
 # depth 250) and IVF-PQ (nprobe 128, depth 200) run in parallel, their candidates are
 # merged and rescored with exact int8 vectors read from the SSD, and the top 10 are returned.
 # Each search makes one Cohere embed call (the trial key allows 2,000 embed inputs a minute).
-# Loads ~15 GB of indexes at startup (~20 s).
+# Loads the indexes at startup (~20-30 s) and holds ~18 GiB of RAM (14.8 GB of index files).
 # Usage: uv run --env-file .env api/main.py   (from the repo root; then open http://127.0.0.1:8000)
 
 import os
