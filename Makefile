@@ -5,7 +5,7 @@
 WIKI_REPO := CohereLabs/wikipedia-2023-11-embed-multilingual-v3-int8-binary
 
 .DEFAULT_GOAL := help
-.PHONY: help download-wiki full winner serve
+.PHONY: help download-wiki full winner web serve web-dev
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -21,5 +21,11 @@ full: ## Write the full corpus (41.5M) as aligned int8, binary, text.bin + offse
 winner: ## Build the winning setup's two indexes for the full corpus (~1.75 h, peak ~23 GB RAM; needs make full)
 	uv run scripts/build_winner.py
 
-serve: ## Search page over the full corpus with the winning setup, at http://127.0.0.1:8000 (needs make winner and COHERE_KEY in .env)
-	uv run --env-file .env scripts/serve.py
+web: ## Build the React search page into web/dist
+	cd web && npm install && npm run build
+
+serve: web ## Search API + page at http://127.0.0.1:8000 (needs make winner and COHERE_KEY in .env; ~15 GB RAM)
+	uv run --env-file .env api/main.py
+
+web-dev: ## React dev server at http://127.0.0.1:5173, forwarding /api to make serve
+	cd web && npm install && npm run dev

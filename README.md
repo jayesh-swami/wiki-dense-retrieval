@@ -73,17 +73,17 @@ Work in progress.
 
 Everything runs through `make`. Run `make` to list the steps.
 
-- `make download-wiki download-nq` downloads the passages, vectors and questions.
-- `make full` writes the full corpus files, and `make embed-questions` embeds the questions with Cohere.
+- `make download-wiki` downloads the passages and vectors.
+- `make full` writes the full corpus files.
 - `make winner` builds the winning setup's two indexes (about 1.75 hours, peak about 23 GB of RAM).
 
-Benchmarking lives in `benchmark/`, with its own Makefile (`make -C benchmark` lists its targets). Its scripts are in `benchmark/scripts/` and results go to `benchmark/results/`. To reproduce the winner's numbers on the validation questions with a cold cache, first build the exact ground truth (`make -C benchmark baseline-topk-exact SLICE=full`), then run:
+Benchmarking lives in `benchmark/`, with its own Makefile (`make -C benchmark` lists its targets, including downloading and embedding the NQ-open questions and making smaller slices). Its scripts are in `benchmark/scripts/` and results go to `benchmark/results/`. To reproduce the winner's numbers on the validation questions with a cold cache, first build the exact ground truth (`make -C benchmark baseline-topk-exact SLICE=full`), then run:
 
 ```
 make -C benchmark bench-winner
 ```
 
-**Search page.** `make serve` starts a small local page at http://127.0.0.1:8000 over the winning setup. It embeds the query with Cohere (needs `COHERE_KEY` in `.env`), retrieves the top 10 passages and shows the embedding and retrieval times. It loads the indexes in about 20 seconds and holds about 15 GB of RAM while running.
+**Search page.** `make serve` builds the React page (`web/`) and starts the FastAPI server (`api/main.py`) at http://127.0.0.1:8000, over the winning setup. `GET /api/search?q=...` embeds the query with Cohere (needs `COHERE_KEY` in `.env`), retrieves the top 10 passages and returns them with the embedding and retrieval times. The server loads the indexes in about 20 to 30 seconds and holds about 15 GB of RAM while running. `make web-dev` runs the page with live reload against the same API.
 
 ## Data
 
