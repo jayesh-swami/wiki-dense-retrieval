@@ -1,6 +1,6 @@
-# wiki-hybrid-retrieval
+# wiki-dense-retrieval
 
-Semantic search over all of English Wikipedia (41.5M passages) on a single laptop, in about 4 ms at p99.
+Semantic search over all of English Wikipedia (41.5M passages) on a single laptop, with a **retrieval p99 of 3.96 ms** (query vector to top 10, query embedding not included).
 
 ![The search page: a retro terminal showing the top passages for "Where was the world wide web invented", with Tim Berners-Lee at CERN as the first result](search-page.png)
 
@@ -47,6 +47,13 @@ At these settings neither index is enough on its own (IVF-PQ alone peaks at reca
 | 4. Serve the search page | `make serve` | 20 to 30 s to load | ~18 GiB | |
 
 Before step 4, put the key in `.env` as `COHERE_KEY=...`. Then open http://127.0.0.1:8000. `make` lists all targets, and `requirements.txt` pins the Python packages for pip users.
+
+## Next steps
+
+- **Asynchronous pipeline.** Start reading the candidate rows from the SSD as soon as the first index returns, while the other is still searching, instead of waiting for both. At scale the whole request path (embedding, search, SSD reads) runs asynchronously, which is the easiest win for throughput.
+- **Hot-row cache.** Keep the int8 rows of the most frequently retrieved passages in RAM, so fewer reads go to the SSD.
+
+And many more small improvements to push it to infinity and beyond.
 
 ## Layout
 

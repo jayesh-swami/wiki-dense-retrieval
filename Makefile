@@ -1,4 +1,4 @@
-# wiki-hybrid-retrieval Makefile
+# wiki-dense-retrieval Makefile
 # Run `make` to see all targets. Benchmarks have their own Makefile: `make -C benchmark`.
 # Recipes must be indented with tabs, not spaces.
 
