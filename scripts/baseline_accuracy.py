@@ -13,9 +13,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pyarrow.parquet as pq
 
-from answers import has_answer, load_answers
+from answers import has_answer, load_answers, passage_texts
 
 name, K, ats = sys.argv[1], int(sys.argv[2]), [int(a) for a in sys.argv[3].split(",")]
 assert max(ats) <= K, f"accuracy@{max(ats)} needs top-K with K >= {max(ats)}"
@@ -23,9 +22,8 @@ assert max(ats) <= K, f"accuracy@{max(ats)} needs top-K with K >= {max(ats)}"
 out = Path("baselines") / name / f"top-{K}"
 gt = np.load(out / "gt_val.npy")[:, :max(ats)]
 answers = load_answers("val")
-text = pq.read_table(f"data/slices/{name}/passages.parquet", columns=["text"])["text"]
 
-passages = text.take(gt.ravel()).to_pylist()
+passages = passage_texts(name, gt.ravel())
 n = gt.shape[1]
 hits = np.array([[has_answer(passages[q * n + r], ans) for r in range(n)] for q, ans in enumerate(answers)])
 

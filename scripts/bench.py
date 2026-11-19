@@ -37,7 +37,7 @@ import pyarrow.parquet as pq
 import tantivy
 from usearch.index import Index, MetricKind, search
 
-from answers import has_answer, load_answers
+from answers import has_answer, load_answers, passage_texts
 
 slice_name, setup = sys.argv[1], sys.argv[2]
 params = dict(a.split("=", 1) for a in sys.argv[3:])
@@ -255,7 +255,6 @@ gt = np.load(f"baselines/{slice_name}/top-100/gt_{qset}.npy")[:, :10]
 answers = load_answers(qset)
 texts = pq.read_table(f"data/questions/{qset}/questions.parquet")["question"].to_pylist()
 warm_texts = pq.read_table(f"data/questions/{warm}/questions.parquet")["question"].to_pylist()[:50]
-text = pq.read_table(d / "passages.parquet", columns=["text"])["text"]
 
 # Build
 t = time.perf_counter()
@@ -274,7 +273,7 @@ for i, (q8, qb, qt) in enumerate(zip(Q8, Qb, texts)):
 
 # Score
 recall = np.mean([len(set(f) & set(g)) / 10 for f, g in zip(found, gt)])
-passages = text.take(found.ravel()).to_pylist()
+passages = passage_texts(slice_name, found.ravel())
 accuracy = np.mean([any(has_answer(p, ans) for p in passages[i * 10:(i + 1) * 10])
                     for i, ans in enumerate(answers)])
 ms = lat_ns / 1e6
