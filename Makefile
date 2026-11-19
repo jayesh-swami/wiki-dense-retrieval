@@ -50,7 +50,7 @@ baseline-accuracy: ## Answer accuracy@AT of the exact top TOPK on val, into base
 baseline-bench: ## Time exact brute-force search on val, one question at a time (needs top-100); into results/
 	uv run scripts/bench.py $(SLICE) exact
 
-bench: ## Benchmark SETUP (exact|binary|hnsw|hnsw_binary|ivf) with PARAMS on QSET (val|tune); into results/
+bench: ## Benchmark SETUP (exact|binary|hnsw|hnsw_binary|ivf|bm25|union) with PARAMS on QSET (val|tune); into results/
 	uv run scripts/bench.py $(SLICE) $(SETUP) $(PARAMS) qset=$(QSET)
 
 bench-rescore: ## Time each stage of binary scan + int8 rescore at DEPTHS; into results/rescore_stages.csv
