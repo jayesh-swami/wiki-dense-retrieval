@@ -2,7 +2,7 @@
 
 Semantic search over all of English Wikipedia (41.5M passages) on a single laptop, with a **retrieval p99 of 3.96 ms** (query vector to top 10, query embedding not included).
 
-![The search page: a retro terminal showing the top passages for "Where was the world wide web invented", with Tim Berners-Lee at CERN as the first result](search-page.png)
+![Demo: searching "where was the world wide web invented" on the search page returns Tim Berners-Lee at CERN first, in 3.99 ms of retrieval](demo.gif)
 
 ## Numbers
 
@@ -18,7 +18,7 @@ Measured on the 3,610 NQ-open validation questions, one query at a time, with a 
 | RAM while serving | about 18 GiB |
 | int8 vectors | 42.5 GB, read from the SSD |
 
-These are numbers for continuous queries. On the search page each query first waits for the Cohere embedding call, and retrieval then takes about 7 to 11 ms, because the CPU caches go cold between queries. Embedding the query with Cohere's API takes another 180 to 450 ms or so.
+These are numbers for continuous queries. On the search page each query first waits for the Cohere embedding call, and retrieval then takes about 7 to 11 ms, because the CPU caches go cold between queries. Embedding the query with Cohere's API takes another 180 to 450 ms or so. `curl "http://127.0.0.1:8000/api/warm?seconds=600"` keeps the caches warm for 10 minutes by running stored question vectors through retrieval (no Cohere calls), which brings page searches back to about 3 ms; the demo above was recorded that way. `seconds=0` stops it.
 
 How the setup was chosen, with every algorithm tried and its numbers, is in [benchmark/README.md](benchmark/README.md).
 
