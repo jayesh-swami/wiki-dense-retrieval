@@ -18,9 +18,11 @@
 #        bench.py 5m ivf coarse=flat|hnsw nlist=16384 nprobe=384 qset=tune
 #        bench.py 5m ivf lists=PQ128x4fs nprobe=128 depth=300 qset=tune
 #        bench.py 5m bm25 qset=tune
+#        bench.py full hnsw_binary M=16 ef=600 depth=300 int8=ssd cache=cold qset=tune
 #        bench.py 5m union h.M=16 h.ef=300 h.depth=300 i.coarse=hnsw i.nprobe=128 i.depth=300 qset=tune
 
 import csv
+import functools
 import json
 import os
 import re
@@ -57,12 +59,6 @@ def exact_top10(X, q8):
     return search(X, q8, 10, MetricKind.IP, exact=True, threads=1).keys
 
 
-def in_ram(X):
-    # Read the memory-mapped int8 vectors into RAM (once), so the page cache can't
-    # change rescore timings.
-    return X if type(X) is np.ndarray else np.array(X)
-
-
 def build_exact(X, B, p):
     return lambda q8, qb, qt: exact_top10(X, q8), None
 
@@ -76,7 +72,7 @@ def build_binary(X, B, p):
 
     def run(q8, qb, qt):
         cand = index.search(qb[None], depth)[1][0]
-        return cand[exact_top10(X[cand], q8)]
+        return cand[exact_top10(rows(cand), q8)]
     return run, None
 
 
@@ -110,7 +106,6 @@ def build_hnsw_binary(X, B, p):
     # USearch searches with max(ef, depth), so ef below depth has no effect.
     M, efc = int(p.get("M", 32)), int(p.get("efc", 128))
     ef, depth = int(p.get("ef", 256)), int(p.get("depth", 100))
-    X = in_ram(X)
     index = Index(ndim=1024, metric="hamming", dtype="b1", connectivity=M, expansion_add=efc)
     build_s = load_or_build(index, Path(f"data/indexes/{slice_name}/hnsw_b1_M{M}_efc{efc}.usearch"), B)
     index.expansion_search = ef
@@ -120,7 +115,7 @@ def build_hnsw_binary(X, B, p):
 
     def run(q8, qb, qt):
         cand = cands(q8, qb, qt)
-        return cand[exact_top10(X[cand], q8)]
+        return cand[exact_top10(rows(cand), q8)]
     run.cands = cands
     return run, build_s
 
@@ -169,14 +164,13 @@ def build_ivf(X, B, p):
     build_s = float(path.with_suffix(".build_s").read_text())
     if lists == "SQ8s":
         return lambda q8, qb, qt: index.search(q8[None].astype(np.float32), 10)[1][0], build_s
-    X = in_ram(X)
 
     def cands(q8, qb, qt):
         return index.search(q8[None].astype(np.float32), depth)[1][0]
 
     def run(q8, qb, qt):
         cand = cands(q8, qb, qt)
-        return cand[exact_top10(X[cand], q8)]
+        return cand[exact_top10(rows(cand), q8)]
     run.cands = cands
     return run, build_s
 
@@ -224,7 +218,6 @@ def build_union(X, B, p):
     # the binary HNSW walk runs on this one (both release the GIL). Their
     # candidates are merged and rescored once with exact int8.
     # Params: h.* go to binary HNSW (M, ef, depth), i.* to IVF-PQ (coarse, nprobe, depth).
-    X = in_ram(X)
     h, hb = build_hnsw_binary(X, B, {k[2:]: v for k, v in p.items() if k.startswith("h.")})
     i, ib = build_ivf(X, B, {"lists": "PQ128x4fs"} | {k[2:]: v for k, v in p.items() if k.startswith("i.")})
     pool = ThreadPoolExecutor(1)
@@ -234,7 +227,7 @@ def build_union(X, B, p):
         ivf = pool.submit(i.cands, q8, qb, qt)
         cand = np.union1d(h.cands(q8, qb, qt), ivf.result())
         sizes.append(len(cand))
-        return cand[exact_top10(X[cand], q8)]
+        return cand[exact_top10(rows(cand), q8)]
     run.sizes = sizes
     return run, hb + ib
 
@@ -245,7 +238,7 @@ SETUPS = {"exact": build_exact, "binary": build_binary, "hnsw": build_hnsw,
 
 # Load data
 X = np.load(d / "int8.npy", mmap_mode="r")
-B = np.load(d / "binary.npy")
+B = np.load(d / "binary.npy", mmap_mode="r")
 Q8 = np.load(f"data/questions/{qset}/q_int8.npy")
 Qb = np.load(f"data/questions/{qset}/q_binary.npy")
 warm = "tune" if qset == "val" else "val"
@@ -256,6 +249,28 @@ answers = load_answers(qset)
 texts = pq.read_table(f"data/questions/{qset}/questions.parquet")["question"].to_pylist()
 warm_texts = pq.read_table(f"data/questions/{warm}/questions.parquet")["question"].to_pylist()[:50]
 
+# Rescore reads. int8=ram (default): all int8 vectors are copied into RAM on first
+# use (fine at 5m). int8=ssd: rows are gathered from the memory-mapped int8.npy,
+# after one posix_fadvise(WILLNEED) per row. That queues all reads at once, so the
+# SSD serves them in parallel (~0.2 ms for 300 rows cold), and the gather itself is
+# one NumPy call. cache=cold evicts int8.npy from the page cache after the warm-up,
+# so timed reads start on the SSD.
+fd = os.open(d / "int8.npy", os.O_RDONLY)
+
+
+@functools.cache
+def x_in_ram():
+    return np.array(X)
+
+
+def rows(ids):
+    if params.get("int8", "ram") == "ram":
+        return x_in_ram()[ids]
+    for i in ids:
+        os.posix_fadvise(fd, X.offset + 1024 * int(i), 1024, os.POSIX_FADV_WILLNEED)
+    return np.array(X[ids])
+
+
 # Build
 t = time.perf_counter()
 run_search, build_s = SETUPS[setup](X, B, params)
@@ -264,6 +279,8 @@ build_s = build_s or time.perf_counter() - t
 # Search
 for q8, qb, qt in zip(warm8, warmb, warm_texts):
     run_search(q8, qb, qt)
+if params.get("cache") == "cold":
+    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
 found = np.zeros((len(Q8), 10), dtype=np.int64)
 lat_ns = np.zeros(len(Q8), dtype=np.int64)
 for i, (q8, qb, qt) in enumerate(zip(Q8, Qb, texts)):
